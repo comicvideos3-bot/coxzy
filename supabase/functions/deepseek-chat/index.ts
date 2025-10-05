@@ -28,14 +28,16 @@ serve(async (req) => {
     const { messages } = await req.json();
     console.log('Received messages:', messages);
 
-    const response = await fetch('https://api.deepseek.com/chat/completions', {
+    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${DEEPSEEK_API_KEY}`,
         'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://lovable.app',
+        'X-Title': 'DeepSeek Chat',
       },
       body: JSON.stringify({
-        model: 'deepseek-chat',
+        model: 'deepseek/deepseek-chat-v3-0324:free',
         messages: messages,
         stream: true,
       }),
