@@ -1,4 +1,4 @@
 project_id = "iwgflkcjfkumekmjyfzf"
 
-[functions.deepseek-chat]
+[functions.ai-responder]
 verify_jwt = false

@@ -4,10 +4,12 @@ import ChatMessage from "@/components/ChatMessage";
 import ChatInput from "@/components/ChatInput";
 import TypingIndicator from "@/components/TypingIndicator";
 import { Sparkles } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
 
 interface Message {
   role: "user" | "assistant";
   content: string;
+  id: string;
 }
 
 const Index = () => {
@@ -24,87 +26,102 @@ const Index = () => {
     scrollToBottom();
   }, [messages, isLoading]);
 
+  // Load existing messages on mount
+  useEffect(() => {
+    loadMessages();
+  }, []);
+
+  // Subscribe to realtime updates
+  useEffect(() => {
+    const channel = supabase
+      .channel('realtime:message')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'message' },
+        (payload) => {
+          const newMsg = payload.new as any;
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: newMsg.id,
+              role: newMsg.sender === 'user' ? 'user' : 'assistant',
+              content: newMsg.message_text,
+            },
+          ]);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
+  const loadMessages = async () => {
+    const { data, error } = await supabase
+      .from('message')
+      .select('*')
+      .order('created_at', { ascending: true });
+
+    if (error) {
+      console.error('Load error:', error);
+      return;
+    }
+
+    if (data) {
+      setMessages(
+        data.map((m) => ({
+          id: m.id,
+          role: m.sender === 'user' ? 'user' : 'assistant',
+          content: m.message_text,
+        }))
+      );
+    }
+  };
+
   const handleSendMessage = async (content: string) => {
-    const userMessage: Message = { role: "user", content };
-    setMessages(prev => [...prev, userMessage]);
     setIsLoading(true);
 
     try {
-      const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/deepseek-chat`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-          },
-          body: JSON.stringify({
-            messages: [...messages, userMessage],
-          }),
-        }
-      );
+      // Insert user message
+      const { data: insertedMsg, error: insertError } = await supabase
+        .from('message')
+        .insert({
+          sender: 'user',
+          message_text: content,
+          status: 'pending',
+        })
+        .select()
+        .single();
 
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+      if (insertError) {
+        console.error('Insert error:', insertError);
+        toast({
+          title: "Error",
+          description: "Failed to send message. Please try again.",
+          variant: "destructive",
+        });
+        return;
       }
 
-      const reader = response.body?.getReader();
-      const decoder = new TextDecoder();
-      let assistantMessage = "";
+      // Call edge function to generate AI response
+      const { error: functionError } = await supabase.functions.invoke('ai-responder', {
+        body: { messageId: insertedMsg.id },
+      });
 
-      if (!reader) {
-        throw new Error("No response body");
-      }
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        const chunk = decoder.decode(value);
-        const lines = chunk.split('\n');
-
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const data = line.slice(6);
-            if (data === '[DONE]') continue;
-            
-            try {
-              const parsed = JSON.parse(data);
-              const content = parsed.choices?.[0]?.delta?.content;
-              
-              if (content) {
-                assistantMessage += content;
-                setMessages(prev => {
-                  const newMessages = [...prev];
-                  const lastMessage = newMessages[newMessages.length - 1];
-                  
-                  if (lastMessage?.role === "assistant") {
-                    newMessages[newMessages.length - 1] = {
-                      role: "assistant",
-                      content: assistantMessage
-                    };
-                  } else {
-                    newMessages.push({
-                      role: "assistant",
-                      content: assistantMessage
-                    });
-                  }
-                  
-                  return newMessages;
-                });
-              }
-            } catch (e) {
-              // Skip invalid JSON
-              console.log('Skipping invalid JSON chunk');
-            }
-          }
-        }
+      if (functionError) {
+        console.error('Function error:', functionError);
+        toast({
+          title: "Error",
+          description: "Failed to get AI response. Please try again.",
+          variant: "destructive",
+        });
       }
     } catch (error) {
       console.error('Error:', error);
       toast({
         title: "Error",
-        description: "Failed to get response from DeepSeek. Please try again.",
+        description: "Something went wrong. Please try again.",
         variant: "destructive",
       });
     } finally {
@@ -123,14 +140,14 @@ const Index = () => {
               DeepSeek Chat
             </h1>
           </div>
-          <p className="text-muted-foreground">Powered by DeepSeek AI v3.1</p>
+          <p className="text-muted-foreground">Powered by Gemini 2.5 Flash</p>
         </div>
 
         {/* Chat Messages */}
         <div className="flex-1 overflow-y-auto mb-6 space-y-4 pr-2">
           {messages.length === 0 && (
             <div className="text-center text-muted-foreground mt-20 animate-fade-in">
-              <p className="text-lg">Start a conversation with DeepSeek AI</p>
+              <p className="text-lg">Start a conversation with AI</p>
               <p className="text-sm mt-2">Ask me anything!</p>
             </div>
           )}
