@@ -3,29 +3,12 @@ import { useParams, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { ArrowLeft, Plus, Trash2, FileCode, Save } from "lucide-react";
+import { ArrowLeft, Code2, MessageSquare, Save } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
+import AIChat, { FileAction } from "@/components/AIChat";
+import CodePreview from "@/components/CodePreview";
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 interface Project {
   id: string;
@@ -43,18 +26,6 @@ interface FileItem {
   updated_at: string;
 }
 
-const LANGUAGES = [
-  { value: "plaintext", label: "Plain Text" },
-  { value: "javascript", label: "JavaScript" },
-  { value: "typescript", label: "TypeScript" },
-  { value: "python", label: "Python" },
-  { value: "java", label: "Java" },
-  { value: "html", label: "HTML" },
-  { value: "css", label: "CSS" },
-  { value: "json", label: "JSON" },
-  { value: "markdown", label: "Markdown" },
-];
-
 const ProjectEditor = () => {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
@@ -64,12 +35,7 @@ const ProjectEditor = () => {
   const [files, setFiles] = useState<FileItem[]>([]);
   const [selectedFile, setSelectedFile] = useState<FileItem | null>(null);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  
-  // New file form state
-  const [newFilePath, setNewFilePath] = useState("");
-  const [newFileLanguage, setNewFileLanguage] = useState("plaintext");
-  const [showNewFileForm, setShowNewFileForm] = useState(false);
+  const [activeView, setActiveView] = useState<"chat" | "code">("chat");
 
   useEffect(() => {
     if (!projectId) {
@@ -163,42 +129,52 @@ const ProjectEditor = () => {
     }
   };
 
-  const handleCreateFile = async () => {
-    if (!newFilePath.trim()) {
-      toast({
-        title: "Invalid file path",
-        description: "Please enter a file path",
-        variant: "destructive",
-      });
-      return;
-    }
-
+  const handleFileAction = async (action: FileAction) => {
     try {
-      const { data, error } = await supabase
-        .from("files")
-        .insert({
-          project_id: projectId,
-          path: newFilePath,
-          language: newFileLanguage,
-          content: "",
-        })
-        .select()
-        .single();
+      if (action.type === "create") {
+        // Check if file already exists
+        const existingFile = files.find(f => f.path === action.path);
+        
+        if (existingFile) {
+          // Update existing file
+          const { error } = await supabase
+            .from("files")
+            .update({ content: action.content, language: action.language })
+            .eq("id", existingFile.id);
 
-      if (error) throw error;
+          if (error) throw error;
+          
+          setSelectedFile({ ...existingFile, content: action.content, language: action.language });
+        } else {
+          // Create new file
+          const { data, error } = await supabase
+            .from("files")
+            .insert({
+              project_id: projectId,
+              path: action.path,
+              language: action.language,
+              content: action.content,
+            })
+            .select()
+            .single();
 
-      toast({
-        title: "File created",
-        description: `Created ${newFilePath}`,
-      });
+          if (error) throw error;
+          setSelectedFile(data);
+        }
+      } else if (action.type === "edit" && selectedFile) {
+        const { error } = await supabase
+          .from("files")
+          .update({ content: action.content })
+          .eq("id", selectedFile.id);
 
-      setNewFilePath("");
-      setNewFileLanguage("plaintext");
-      setShowNewFileForm(false);
-      setSelectedFile(data);
+        if (error) throw error;
+        setSelectedFile({ ...selectedFile, content: action.content });
+      }
+      
+      await loadFiles();
     } catch (error: any) {
       toast({
-        title: "Error creating file",
+        title: "Error updating file",
         description: error.message,
         variant: "destructive",
       });
@@ -208,14 +184,10 @@ const ProjectEditor = () => {
   const handleSaveFile = async () => {
     if (!selectedFile) return;
 
-    setSaving(true);
     try {
       const { error } = await supabase
         .from("files")
-        .update({
-          content: selectedFile.content,
-          language: selectedFile.language,
-        })
+        .update({ content: selectedFile.content })
         .eq("id", selectedFile.id);
 
       if (error) throw error;
@@ -227,34 +199,6 @@ const ProjectEditor = () => {
     } catch (error: any) {
       toast({
         title: "Error saving file",
-        description: error.message,
-        variant: "destructive",
-      });
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleDeleteFile = async (fileId: string) => {
-    try {
-      const { error } = await supabase
-        .from("files")
-        .delete()
-        .eq("id", fileId);
-
-      if (error) throw error;
-
-      toast({
-        title: "File deleted",
-        description: "File has been removed",
-      });
-
-      if (selectedFile?.id === fileId) {
-        setSelectedFile(null);
-      }
-    } catch (error: any) {
-      toast({
-        title: "Error deleting file",
         description: error.message,
         variant: "destructive",
       });
@@ -272,7 +216,7 @@ const ProjectEditor = () => {
   if (!project) return null;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-background via-background to-secondary">
+    <div className="min-h-screen bg-background flex flex-col">
       <header className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div className="container mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center gap-4">
@@ -286,179 +230,80 @@ const ProjectEditor = () => {
               )}
             </div>
           </div>
+
+          <Tabs value={activeView} onValueChange={(v) => setActiveView(v as "chat" | "code")}>
+            <TabsList>
+              <TabsTrigger value="chat" className="flex items-center gap-2">
+                <MessageSquare className="h-4 w-4" />
+                AI Chat
+              </TabsTrigger>
+              <TabsTrigger value="code" className="flex items-center gap-2">
+                <Code2 className="h-4 w-4" />
+                Code Editor
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
         </div>
       </header>
 
-      <main className="container mx-auto px-4 py-6">
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-          {/* File Explorer */}
-          <Card className="lg:col-span-1">
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <CardTitle>Files</CardTitle>
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  onClick={() => setShowNewFileForm(!showNewFileForm)}
-                >
-                  <Plus className="h-4 w-4" />
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              {showNewFileForm && (
-                <div className="space-y-2 p-3 border rounded-lg bg-muted/50">
+      <main className="flex-1 flex overflow-hidden">
+        <div className="w-full grid grid-cols-1 lg:grid-cols-2 h-full">
+          {/* Left Panel - Chat or Code Editor */}
+          <div className="border-r flex flex-col h-full">
+            {activeView === "chat" ? (
+              <AIChat projectId={projectId!} onFileAction={handleFileAction} />
+            ) : (
+              <div className="flex flex-col h-full">
+                <div className="p-4 border-b flex items-center justify-between">
                   <div>
-                    <Label htmlFor="filePath">File Path</Label>
-                    <Input
-                      id="filePath"
-                      placeholder="src/example.ts"
-                      value={newFilePath}
-                      onChange={(e) => setNewFilePath(e.target.value)}
-                    />
+                    <h3 className="font-semibold">
+                      {selectedFile?.path || "No file selected"}
+                    </h3>
+                    {selectedFile && (
+                      <p className="text-sm text-muted-foreground">
+                        {selectedFile.language}
+                      </p>
+                    )}
                   </div>
-                  <div>
-                    <Label htmlFor="language">Language</Label>
-                    <Select value={newFileLanguage} onValueChange={setNewFileLanguage}>
-                      <SelectTrigger id="language">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {LANGUAGES.map((lang) => (
-                          <SelectItem key={lang.value} value={lang.value}>
-                            {lang.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="flex gap-2">
-                    <Button size="sm" onClick={handleCreateFile} className="flex-1">
-                      Create
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => setShowNewFileForm(false)}
-                    >
-                      Cancel
-                    </Button>
-                  </div>
-                </div>
-              )}
-
-              {files.length === 0 ? (
-                <p className="text-sm text-muted-foreground text-center py-4">
-                  No files yet. Create one to get started.
-                </p>
-              ) : (
-                files.map((file) => (
-                  <div
-                    key={file.id}
-                    className={`flex items-center justify-between p-2 rounded-lg cursor-pointer transition-colors ${
-                      selectedFile?.id === file.id
-                        ? "bg-primary text-primary-foreground"
-                        : "hover:bg-muted"
-                    }`}
-                    onClick={() => setSelectedFile(file)}
-                  >
-                    <div className="flex items-center gap-2 flex-1 min-w-0">
-                      <FileCode className="h-4 w-4 flex-shrink-0" />
-                      <span className="text-sm truncate">{file.path}</span>
-                    </div>
-                    <AlertDialog>
-                      <AlertDialogTrigger asChild>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-6 w-6"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <Trash2 className="h-3 w-3" />
-                        </Button>
-                      </AlertDialogTrigger>
-                      <AlertDialogContent>
-                        <AlertDialogHeader>
-                          <AlertDialogTitle>Delete file?</AlertDialogTitle>
-                          <AlertDialogDescription>
-                            This will permanently delete "{file.path}". This action cannot be undone.
-                          </AlertDialogDescription>
-                        </AlertDialogHeader>
-                        <AlertDialogFooter>
-                          <AlertDialogCancel>Cancel</AlertDialogCancel>
-                          <AlertDialogAction
-                            onClick={() => handleDeleteFile(file.id)}
-                            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                          >
-                            Delete
-                          </AlertDialogAction>
-                        </AlertDialogFooter>
-                      </AlertDialogContent>
-                    </AlertDialog>
-                  </div>
-                ))
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Code Editor */}
-          <Card className="lg:col-span-3">
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle>
-                    {selectedFile ? selectedFile.path : "No file selected"}
-                  </CardTitle>
                   {selectedFile && (
-                    <CardDescription>
-                      Last updated: {new Date(selectedFile.updated_at).toLocaleString()}
-                    </CardDescription>
+                    <Button onClick={handleSaveFile} size="sm">
+                      <Save className="h-4 w-4 mr-2" />
+                      Save
+                    </Button>
                   )}
                 </div>
-                {selectedFile && (
-                  <div className="flex items-center gap-2">
-                    <Select
-                      value={selectedFile.language}
-                      onValueChange={(value) =>
-                        setSelectedFile({ ...selectedFile, language: value })
+
+                <ScrollArea className="flex-1">
+                  {selectedFile ? (
+                    <Textarea
+                      value={selectedFile.content || ""}
+                      onChange={(e) =>
+                        setSelectedFile({ ...selectedFile, content: e.target.value })
                       }
-                    >
-                      <SelectTrigger className="w-[150px]">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {LANGUAGES.map((lang) => (
-                          <SelectItem key={lang.value} value={lang.value}>
-                            {lang.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <Button onClick={handleSaveFile} disabled={saving}>
-                      <Save className="h-4 w-4 mr-2" />
-                      {saving ? "Saving..." : "Save"}
-                    </Button>
-                  </div>
-                )}
+                      placeholder="Start typing..."
+                      className="min-h-full font-mono text-sm border-0 rounded-none resize-none focus-visible:ring-0"
+                    />
+                  ) : (
+                    <div className="flex items-center justify-center h-full text-muted-foreground">
+                      <div className="text-center">
+                        <Code2 className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                        <p>Select a file from the preview panel to edit</p>
+                      </div>
+                    </div>
+                  )}
+                </ScrollArea>
               </div>
-            </CardHeader>
-            <CardContent>
-              {selectedFile ? (
-                <Textarea
-                  value={selectedFile.content || ""}
-                  onChange={(e) =>
-                    setSelectedFile({ ...selectedFile, content: e.target.value })
-                  }
-                  placeholder="Start typing..."
-                  className="min-h-[500px] font-mono text-sm"
-                />
-              ) : (
-                <div className="flex items-center justify-center min-h-[500px] text-muted-foreground">
-                  Select a file to edit or create a new one
-                </div>
-              )}
-            </CardContent>
-          </Card>
+            )}
+          </div>
+
+          {/* Right Panel - Preview */}
+          <div className="flex flex-col h-full">
+            <CodePreview
+              files={files}
+              selectedFile={selectedFile}
+              onFileSelect={(file) => setSelectedFile(file)}
+            />
+          </div>
         </div>
       </main>
     </div>
