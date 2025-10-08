@@ -125,7 +125,7 @@ const ProjectList = ({ userId }: ProjectListProps) => {
           key={project.id}
           className="hover:shadow-lg transition-shadow cursor-pointer group"
         >
-          <CardHeader onClick={() => navigate(`/project/${project.id}`)}>
+          <CardHeader onClick={() => navigate(`/editor/${project.id}`)}>
             <div className="flex items-start justify-between">
               <Folder className="h-8 w-8 text-primary mb-2" />
             </div>

@@ -3,7 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Code2, MessageSquare, Save } from "lucide-react";
+import { ArrowLeft, Code2, MessageSquare, Save, Settings } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import AIChat, { FileAction } from "@/components/AIChat";
@@ -231,18 +231,27 @@ const ProjectEditor = () => {
             </div>
           </div>
 
-          <Tabs value={activeView} onValueChange={(v) => setActiveView(v as "chat" | "code")}>
-            <TabsList>
-              <TabsTrigger value="chat" className="flex items-center gap-2">
-                <MessageSquare className="h-4 w-4" />
-                AI Chat
-              </TabsTrigger>
-              <TabsTrigger value="code" className="flex items-center gap-2">
-                <Code2 className="h-4 w-4" />
-                Code Editor
-              </TabsTrigger>
-            </TabsList>
-          </Tabs>
+          <div className="flex items-center gap-4">
+            <Tabs value={activeView} onValueChange={(v) => setActiveView(v as "chat" | "code")}>
+              <TabsList>
+                <TabsTrigger value="chat" className="flex items-center gap-2">
+                  <MessageSquare className="h-4 w-4" />
+                  AI Chat
+                </TabsTrigger>
+                <TabsTrigger value="code" className="flex items-center gap-2">
+                  <Code2 className="h-4 w-4" />
+                  Code Editor
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => navigate(`/project/${projectId}/settings`)}
+            >
+              <Settings className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
       </header>
 
