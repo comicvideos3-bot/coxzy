@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dual-Panel AI Interface (Chat & Receiver)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.38.5/dist/umd/supabase.min.js"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background: #0d1117;
+            overflow-x: hidden;
+            background-image: linear-gradient(45deg, #0d1117 0%, #172138 50%, #0d1117 100%);
+            background-size: 300% 300%;
+            animation: gradient-animation 20s ease infinite;
+        }
+        @keyframes gradient-animation {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+        }
+
+        .cosmic-card {
+            background-color: rgba(22, 27, 34, 0.6);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(48, 54, 61, 0.4);
+            box-shadow: 0 0 40px rgba(139, 92, 246, 0.15);
+            display: flex;
+            flex-direction: column;
+            min-height: 85vh;
+        }
+
+        .spinner {
+            border: 4px solid rgba(255, 255, 255, 0.2);
+            border-top: 4px solid #8b5cf6;
+            border-radius: 50%;
+            width: 32px;
+            height: 32px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .user-message {
+            background-color: #4f46e5;
+            align-self: flex-end;
+            border-bottom-right-radius: 0;
+        }
+        .model-message {
+            background-color: #172138;
+            align-self: flex-start;
+            border-bottom-left-radius: 0;
+            border: 1px solid #30363d;
+        }
+
+        .cosmic-button {
+            background-image: linear-gradient(90deg, #4f46e5, #a855f7);
+            transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+            box-shadow: 0 4px 15px rgba(168, 85, 247, 0.5);
+            font-weight: 700;
+        }
+        .cosmic-button:hover:not(:disabled) {
+            transform: translateY(-1px);
+            box-shadow: 0 6px 20px rgba(168, 85, 247, 0.6);
+        }
+
+        #chat-output {
+            flex-grow: 1;
+            overflow-y: auto;
+            scrollbar-width: thin;
+            scrollbar-color: #a855f7 #172138;
+        }
+        #auto-reply-toggle:checked ~ .dot {
+            transform: translateX(100%);
+            background-color: #00d4ff;
+        }
+        #auto-reply-toggle:checked ~ .block {
+            background-color: #00a6cc;
+        }
+    </style>
+</head>
+<body class="p-4 md:p-8 min-h-screen">
+    <div class="flex flex-col lg:flex-row gap-8 justify-center items-stretch w-full max-w-7xl mx-auto">
+
+        <!-- LEFT PANEL: Chat Interface -->
+        <div class="flex-1 w-full lg:max-w-[50%] cosmic-card p-6 md:p-8 rounded-3xl shadow-2xl">
+            <h1 class="text-3xl font-extrabold text-white mb-2 text-center tracking-wider">
+                🤖 AI Chat Interface
+            </h1>
+            <p class="text-sm text-gray-400 mb-6 text-center">
+                Messages are sent to Supabase and AI responds automatically
+            </p>
+
+            <div id="chat-output" class="flex flex-col gap-4 p-4 rounded-lg bg-[#0d1117] mb-6 overflow-y-auto min-h-[50vh] max-h-[60vh]">
+                <div class="model-message p-3 rounded-xl max-w-4/5 text-gray-300">
+                    Hello! Send a message and I'll respond through the Supabase system.
+                </div>
+            </div>
+
+            <div id="loading-area" class="flex items-center justify-center p-2 mb-4 hidden">
+                <div class="spinner mr-3"></div>
+                <p id="loading-text" class="text-gray-300 text-sm">Waiting for AI response...</p>
+            </div>
+
+            <div class="flex gap-4">
+                <textarea
+                    id="user-input"
+                    placeholder="Type your message here..."
+                    rows="2"
+                    class="flex-grow p-3 bg-[#0d1117] text-white rounded-xl border border-[#30363d] focus:border-purple-500 focus:ring-1 focus:ring-purple-500 transition duration-150 placeholder:text-gray-500 resize-none"
+                    onkeypress="if(event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); sendMessage(); }"
+                ></textarea>
+
+                <button
+                    id="send-button"
+                    onclick="sendMessage()"
+                    class="cosmic-button text-white text-md py-3 px-6 rounded-xl shadow-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
+                >
+                    <i data-lucide="send" class="w-5 h-5"></i>
+                </button>
+            </div>
+
+            <div id="status-message" class="text-center text-red-400 mt-2 font-medium hidden text-xs"></div>
+        </div>
+
+        <!-- RIGHT PANEL: AI Message Receiver Dashboard -->
+        <div class="flex-1 w-full lg:max-w-[50%] cosmic-card p-6 md:p-8 rounded-3xl shadow-2xl">
+            <h1 class="text-3xl font-extrabold text-white mb-2 text-center tracking-wider text-[#00d4ff]">
+                AI Message Receiver Dashboard
+            </h1>
+            <div class="flex justify-between items-center mb-4">
+                <p class="text-sm text-gray-400">
+                    View and reply to messages from the 'message' table in Supabase.
+                </p>
+                <label class="flex items-center cursor-pointer">
+                    <span class="mr-3 text-sm font-medium text-white">Auto-Reply:</span>
+                    <div class="relative">
+                        <input type="checkbox" id="auto-reply-toggle" class="sr-only" onchange="toggleAutoReply()" checked>
+                        <div class="block bg-gray-600 w-14 h-8 rounded-full"></div>
+                        <div class="dot absolute left-1 top-1 bg-white w-6 h-6 rounded-full transition"></div>
+                    </div>
+                </label>
+            </div>
+
+            <div id="messages" class="flex flex-col gap-4 p-4 rounded-lg bg-[#0d1117] overflow-y-auto flex-grow min-h-[50vh] max-h-[60vh]">
+                <p class="text-gray-500 text-center">Loading pending messages...</p>
+            </div>
+            <div id="receiver-status" class="text-center text-red-400 mt-2 font-medium hidden text-xs"></div>
+        </div>
+    </div>
+
+    <script type="module">
+        lucide.createIcons();
+
+        const SUPABASE_URL = "https://uqpeowimrhumyajxqjzu.supabase.co";
+        const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVxcGVvd2ltcmh1bXlhanhxanp1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTkxNTIxMzQsImV4cCI6MjA3NDcyODEzNH0.p7zHF2JhOL5VoJm1GshH8j9rxbCTW07MBfVJ_EAAP_w";
+
+        const { createClient } = supabase;
+        const client = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+        const userInput = document.getElementById('user-input');
+        const sendButton = document.getElementById('send-button');
+        const loadingArea = document.getElementById('loading-area');
+        const chatOutput = document.getElementById('chat-output');
+        const statusMessage = document.getElementById('status-message');
+
+        const messagesDiv = document.getElementById("messages");
+        const receiverStatus = document.getElementById("receiver-status");
+
+        let isAutoReplyEnabled = true;
+        let currentMessageId = null;
+
+        function addMessageToChat(content, sender) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `p-3 rounded-xl max-w-[90%] break-words whitespace-pre-wrap transition duration-300 ${
+                sender === 'user'
+                    ? 'user-message text-white'
+                    : 'model-message text-gray-300'
+            }`;
+            messageDiv.innerHTML = content;
+            chatOutput.appendChild(messageDiv);
+            chatOutput.scrollTop = chatOutput.scrollHeight;
+        }
+
+        window.sendMessage = async function() {
+            const userQuery = userInput.value.trim();
+
+            if (!userQuery) {
+                statusMessage.textContent = "Please enter a message.";
+                statusMessage.classList.remove('hidden');
+                return;
+            }
+
+            statusMessage.classList.add('hidden');
+            addMessageToChat(userQuery, 'user');
+            userInput.value = '';
+
+            sendButton.disabled = true;
+            loadingArea.classList.remove('hidden');
+
+            try {
+                const { data, error } = await client.from("message").insert([
+                    {
+                        sender: "user",
+                        message_text: userQuery,
+                        status: "pending",
+                    },
+                ]).select();
+
+                if (error) throw error;
+
+                currentMessageId = data[0].id;
+                waitForAIResponse(currentMessageId);
+
+            } catch (error) {
+                console.error("Error sending message:", error);
+                statusMessage.textContent = `Failed to send message: ${error.message}`;
+                statusMessage.classList.remove('hidden');
+                loadingArea.classList.add('hidden');
+                sendButton.disabled = false;
+            }
+        }
+
+        async function waitForAIResponse(messageId) {
+            const maxWaitTime = 60000;
+            const checkInterval = 1000;
+            let elapsedTime = 0;
+
+            const checkForResponse = setInterval(async () => {
+                try {
+                    const { data: messages, error } = await client
+                        .from("message")
+                        .select("*")
+                        .eq("status", "answered")
+                        .order("created_at", { ascending: false })
+                        .limit(1);
+
+                    if (error) throw error;
+
+                    if (messages && messages.length > 0 && messages[0].sender === "ai") {
+                        const aiMessage = messages[0];
+                        const userMessage = await client
+                            .from("message")
+                            .select("*")
+                            .eq("id", messageId)
+                            .single();
+
+                        if (userMessage.data && userMessage.data.status === "answered") {
+                            clearInterval(checkForResponse);
+                            addMessageToChat(aiMessage.message_text, 'model');
+                            loadingArea.classList.add('hidden');
+                            sendButton.disabled = false;
+                            currentMessageId = null;
+                            return;
+                        }
+                    }
+
+                    elapsedTime += checkInterval;
+                    if (elapsedTime >= maxWaitTime) {
+                        clearInterval(checkForResponse);
+                        statusMessage.textContent = "Response timeout. Please try again.";
+                        statusMessage.classList.remove('hidden');
+                        loadingArea.classList.add('hidden');
+                        sendButton.disabled = false;
+                    }
+                } catch (error) {
+                    console.error("Error checking for response:", error);
+                }
+            }, checkInterval);
+        }
+
+        let isAutoReplyEnabled = true;
+
+        window.toggleAutoReply = function() {
+            isAutoReplyEnabled = document.getElementById('auto-reply-toggle').checked;
+            if (isAutoReplyEnabled) {
+                receiverStatus.textContent = "Auto-Reply is now ON. Triggering AI processor...";
+                triggerAIProcessor();
+            } else {
+                receiverStatus.textContent = "Auto-Reply is OFF. Messages will remain pending.";
+            }
+            receiverStatus.classList.remove('text-red-400');
+            receiverStatus.classList.add('text-cyan-400');
+            receiverStatus.classList.remove('hidden');
+
+            setTimeout(() => { receiverStatus.classList.add('hidden'); }, 3000);
+        }
+
+        async function triggerAIProcessor() {
+            if (!isAutoReplyEnabled) return;
+
+            try {
+                const response = await fetch(`${SUPABASE_URL}/functions/v1/ai-message-processor`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+                        'Content-Type': 'application/json',
+                    },
+                });
+
+                const result = await response.json();
+                loadMessages();
+            } catch (error) {
+                console.error("Error triggering AI processor:", error);
+            }
+        }
+
+        async function loadMessages() {
+            if (!isAutoReplyEnabled) {
+                receiverStatus.classList.add('hidden');
+            }
+
+            messagesDiv.innerHTML = `<p class="text-gray-500 text-center p-4">Loading pending messages...</p>`;
+
+            const { data, error } = await client
+                .from("message")
+                .select("*")
+                .eq("status", "pending")
+                .order("created_at", { ascending: true });
+
+            if (error) {
+                console.error("Supabase Error:", error);
+                messagesDiv.innerHTML = `<p class="text-red-400 text-center p-4">⚠️ Failed to load messages: ${error.message}</p>`;
+                receiverStatus.textContent = "Failed to connect to Supabase.";
+                receiverStatus.classList.remove('hidden');
+                return;
+            }
+
+            if (isAutoReplyEnabled && data && data.length > 0) {
+                receiverStatus.textContent = `Auto-Reply ON: Found ${data.length} pending messages. Processing...`;
+                receiverStatus.classList.remove('hidden');
+                triggerAIProcessor();
+            }
+
+            renderMessages(data);
+        }
+
+        window.renderMessages = function(data) {
+            messagesDiv.innerHTML = "";
+            if (!data || data.length === 0) {
+                messagesDiv.innerHTML = "<p class='text-gray-500 text-center p-4'>No pending messages 💤</p>";
+                return;
+            }
+
+            data.forEach((msg) => {
+                const div = document.createElement("div");
+                div.id = `message-${msg.id}`;
+                div.className = "p-4 rounded-xl bg-[#1c1f26] border border-[#30363d] shadow-md";
+                div.innerHTML = `
+                    <p class="text-sm text-gray-400 mb-1"><strong>ID:</strong> ${msg.id}</p>
+                    <p class="text-sm mb-2"><strong>From:</strong> <span class="text-cyan-400">${msg.sender}</span></p>
+                    <p class="text-lg font-medium text-white mb-3">${msg.message_text}</p>
+                    <textarea
+                        id="reply-${msg.id}"
+                        placeholder="Type manual reply..."
+                        rows="2"
+                        class="w-full p-2 rounded-lg border border-gray-600 bg-[#2c3038] text-white resize-none focus:outline-none focus:border-cyan-400"
+                    ></textarea>
+                    <button
+                        id="reply-btn-${msg.id}"
+                        onclick="sendReply('${msg.id}')"
+                        class="bg-[#00d4ff] hover:bg-[#00a6cc] text-black font-semibold py-2 px-4 rounded-lg mt-2 transition duration-200"
+                    >
+                        Send Reply & Mark Answered
+                    </button>
+                `;
+                messagesDiv.appendChild(div);
+            });
+        }
+
+        window.sendReply = async function(id) {
+            const textarea = document.getElementById(`reply-${id}`);
+            const button = document.getElementById(`reply-btn-${id}`);
+            const reply = textarea.value.trim();
+
+            if (!reply) {
+                receiverStatus.textContent = "Please type a reply first.";
+                receiverStatus.classList.remove('hidden');
+                return;
+            }
+
+            button.disabled = true;
+            button.textContent = "Sending...";
+            receiverStatus.classList.add('hidden');
+
+            try {
+                const { error: insertError } = await client.from("message").insert([
+                    {
+                        sender: "ai (manual)",
+                        message_text: reply,
+                        status: "answered",
+                    },
+                ]);
+
+                if (insertError) throw new Error(`Insert failed: ${insertError.message}`);
+
+                const { error: updateError } = await client.from("message").update({ status: "answered" }).eq("id", id);
+
+                if (updateError) throw new Error(`Update failed: ${updateError.message}`);
+
+                loadMessages();
+
+            } catch (e) {
+                console.error("Reply Error:", e);
+                receiverStatus.textContent = `Failed to send reply: ${e.message}`;
+                receiverStatus.classList.remove('hidden');
+                button.disabled = false;
+                button.textContent = "Send Reply & Mark Answered";
+            }
+        }
+
+        setInterval(() => {
+            loadMessages();
+            if (isAutoReplyEnabled) {
+                triggerAIProcessor();
+            }
+        }, 5000);
+
+        toggleAutoReply();
+    </script>
+</body>
+</html>
